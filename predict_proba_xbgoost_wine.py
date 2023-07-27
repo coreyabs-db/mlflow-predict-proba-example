@@ -79,9 +79,14 @@ with mlflow.start_run() as run:
 
     wrapper = CustomWrapperModel(model)
 
+    # logging the sklearn model will use the default predict
     mlflow.sklearn.log_model(sk_model=model, artifact_path="model")
+
+    # we could instead log it to override the method pyfunc calls
+    mlflow.sklearn.log_model(sk_model=model, artifact_path="predict_fn_model", pyfunc_predict_fn="predict_proba")
+
+    # we can use a wrapper to have it call predict_proba (or do other processing)
     mlflow.pyfunc.log_model(python_model=wrapper, artifact_path="wrapper")
-    
 
 
 # COMMAND ----------
@@ -92,6 +97,10 @@ with mlflow.start_run() as run:
 model_uri = f"runs:/{run_id}/model"
 loaded_model_pyfunc = mlflow.pyfunc.load_model(model_uri)
 loaded_model_sklearn = mlflow.sklearn.load_model(model_uri)
+
+# These two artifact paths were logged with the alternative predict_fn specified.
+predict_fn_uri = f"runs:/{run_id}/predict_fn_model"
+loaded_model_predict_fn = mlflow.pyfunc.load_model(predict_fn_uri)
 
 # The /wrapper artifact path was logged with the pyfunc flavor.
 # We can load it with the pyfunc flavor
@@ -127,6 +136,11 @@ loaded_model_wrapper.predict(X_test)
 
 # COMMAND ----------
 
+# DBTITLE 1,scikit-learn logged with pyfunc_predict_fn
+loaded_model_predict_fn.predict(X_test)
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC # Spark UDF example
 # MAGIC
@@ -144,6 +158,7 @@ X_test_df = spark.createDataFrame(X_test)
 #       this is just one approach (and the most common)
 pyfunc_udf = mlflow.pyfunc.spark_udf(spark, model_uri)
 wrapper_udf = mlflow.pyfunc.spark_udf(spark, wrapper_uri)
+predict_fn_udf = mlflow.pyfunc.spark_udf(spark, predict_fn_uri, result_type="array<double>")
 
 display(X_test_df)
 
@@ -158,3 +173,9 @@ display(pyfunc_results.select("prediction"))
 # DBTITLE 1,See prediction results with default PyFunc wrapper
 wrapper_results = X_test_df.withColumn("prediction", wrapper_udf(F.struct(*X_test_df.columns)))
 display(wrapper_results.select(F.round("prediction", 3).alias("prediction")))
+
+# COMMAND ----------
+
+# DBTITLE 1,See prediction results with default predict_fn wrapper
+predict_fn_results = X_test_df.withColumn("prediction", predict_fn_udf(F.struct(*X_test_df.columns)))
+display(predict_fn_results.select(F.round(F.col("prediction")[1], 3)))
