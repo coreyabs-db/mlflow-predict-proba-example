@@ -86,10 +86,15 @@ with mlflow.start_run() as run:
 
 # COMMAND ----------
 
+# DBTITLE 1,Load the model using various flavors
+# The /model artifact path was logged with the sklearn flavor on the raw model
+# We can load it with both the pyfunc flavor and sklearn flavor
 model_uri = f"runs:/{run_id}/model"
 loaded_model_pyfunc = mlflow.pyfunc.load_model(model_uri)
 loaded_model_sklearn = mlflow.sklearn.load_model(model_uri)
 
+# The /wrapper artifact path was logged with the pyfunc flavor.
+# We can load it with the pyfunc flavor
 wrapper_uri = f"runs:/{run_id}/wrapper"
 loaded_model_wrapper = mlflow.pyfunc.load_model(wrapper_uri)
 
@@ -106,12 +111,12 @@ loaded_model_pyfunc.predict(X_test)
 
 # COMMAND ----------
 
-# DBTITLE 1,Load sklearn can also call predict
+# DBTITLE 1,Loaded as sklearn we can also call predict
 loaded_model_sklearn.predict(X_test)
 
 # COMMAND ----------
 
-# DBTITLE 1,Load sklearn to just use predict proba
+# DBTITLE 1,But we can also use predict_proba
 # Note: expected to work
 loaded_model_sklearn.predict_proba(X_test)[:, 1]
 
@@ -124,12 +129,19 @@ loaded_model_wrapper.predict(X_test)
 
 # MAGIC %md
 # MAGIC # Spark UDF example
+# MAGIC
+# MAGIC The advantage of having PyFunc call `predict_proba` is that we can let MLflow 
+# MAGIC create our Spark UDF for us, and still get our custom results out, such as
+# MAGIC probabilities via `predict_proba`.
 
 # COMMAND ----------
 
 # DBTITLE 1,Create Spark DataFrame and UDF's
 X_test_df = spark.createDataFrame(X_test)
 
+# pyfunc can automatically create a UDF for you
+# Note: you can also create your own UDF's
+#       this is just one approach (and the most common)
 pyfunc_udf = mlflow.pyfunc.spark_udf(spark, model_uri)
 wrapper_udf = mlflow.pyfunc.spark_udf(spark, wrapper_uri)
 
@@ -143,10 +155,6 @@ display(pyfunc_results.select("prediction"))
 
 # COMMAND ----------
 
-X_test_df_num = X_test_df.toDF(*[str(i) for i in range(len(X_test_df.columns))])
-
-# COMMAND ----------
-
 # DBTITLE 1,See prediction results with default PyFunc wrapper
 wrapper_results = X_test_df.withColumn("prediction", wrapper_udf(F.struct(*X_test_df.columns)))
-display(wrapper_results)
+display(wrapper_results.select(F.round("prediction", 3).alias("prediction")))
